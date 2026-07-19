@@ -41,6 +41,16 @@ class TransferResourceService
             return $passwordError;
         }
 
+        $permanentLocal = $this->findPermanentLocalResource($value);
+        if ($permanentLocal !== null) {
+            DiagnosticLogService::record('transfer', 'permanent_local_hit', 'success', '命中永久本地资源', [
+                'keyword' => $value['title'],
+                'url' => $value['url'],
+                'duration_ms' => intval((microtime(true) - $transferStart) * 1000),
+            ]);
+            return jok('本地资源获取成功', $permanentLocal);
+        }
+
         $existing = $this->findBySourceUrl($value);
         if ($existing !== null) {
             DiagnosticLogService::record('transfer', 'local_hit', 'success', '命中已转存临时资源', [
@@ -179,6 +189,32 @@ class TransferResourceService
         }
 
         return null;
+    }
+
+    private function findPermanentLocalResource(array $value)
+    {
+        $resource = $this->sourceModel
+            ->where('status', 1)
+            ->where('is_delete', 0)
+            ->where('is_time', 0)
+            ->where('url', $value['url'])
+            ->field('source_id as id, title, url, is_type, code')
+            ->find();
+
+        if (empty($resource)) {
+            return null;
+        }
+
+        $this->sourceModel->where('source_id', $resource['id'])->update(['update_time' => time()]);
+        $resource = $resource->toArray();
+        unset($resource['id']);
+
+        return $this->panTreeService->appendKeyForClient(
+            $resource,
+            $resource['url'],
+            isset($resource['code']) ? $resource['code'] : '',
+            $value['stoken']
+        );
     }
 
     private function findBySourceUrl(array $value)
